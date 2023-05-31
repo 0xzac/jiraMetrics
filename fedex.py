@@ -117,7 +117,7 @@ class Fedex:
             
             return processed_address
 
-    def track_shipment(self, tracking_num, print_response=False):
+    def track_shipment(self, tracking_num, print_response=False, return_raw=False):
         """Retrieve tracking info from fedex"""
        
         url = 'https://apis.fedex.com/track/v1/trackingnumbers'
@@ -137,39 +137,51 @@ class Fedex:
 
         if print_response:
             print(response.json())
+        
         if(response.status_code == 401):
             print("re-authing -- 401")
             self.api_key = self.authenticate()
             return self.track_shipment(tracking_num)
 
-        return self.process_tracking(response.json())
+        if return_raw:
+            return response.json()
+        else:
+            return self.process_tracking(response.json())
         
     def process_tracking(self, response):
-        """Processes fedex json response"""
+            """Processes fedex json response"""
 
-        status_info = 'Pending'
-        status = response['output']['completeTrackResults'][0]['trackResults'][0]['latestStatusDetail']['statusByLocale']
-        latest_ship_event = response['output']['completeTrackResults'][0]['trackResults'][0]['scanEvents'][0]['exceptionDescription']
+            delivery_attempts = 0
+            status_info = 'Pending'
+            status = response['output']['completeTrackResults'][0]['trackResults'][0]['latestStatusDetail']['statusByLocale']
+            latest_ship_event = response['output']['completeTrackResults'][0]['trackResults'][0]['scanEvents'][0]['exceptionDescription']
 
-        try:
-            latest_ship_event = response['output']['completeTrackResults'][0]['trackResults'][0]['error']['code']
-        except KeyError:
-            for i in response['output']['completeTrackResults'][0]['trackResults'][0]['dateAndTimes']:
-                if i['type'] == 'ESTIMATED_DELIVERY':
-                    status_info = i['dateTime'][0:(i['dateTime']).index('T')] 
-                elif i['type'] == 'ACTUAL_DELIVERY':
-                    status_info = i['dateTime'][0:(i['dateTime']).index('T')]
+            try:
+                latest_ship_event = response['output']['completeTrackResults'][0]['trackResults'][0]['error']['code']
+            except KeyError:
+                for i in response['output']['completeTrackResults'][0]['trackResults'][0]['dateAndTimes']:
+                    if i['type'] == 'ESTIMATED_DELIVERY':
+                        status_info = i['dateTime'][0:(i['dateTime']).index('T')] 
+                    elif i['type'] == 'ACTUAL_DELIVERY':
+                        status_info = i['dateTime'][0:(i['dateTime']).index('T')]
+                    elif i['type'] == 'COMMITMENT':
+                        status_info = i['dateTime'][0:(i['dateTime']).index('T')]
 
-            if latest_ship_event == 'Package delayed' or (latest_ship_event == '' and status == 'Delivery exception'):
+                if latest_ship_event == 'Package delayed' or (latest_ship_event == '' and status == 'Delivery exception'):
+                    for i in response['output']['completeTrackResults'][0]['trackResults'][0]['scanEvents']:
+                        if i['eventDescription'] == 'Delivery exception':
+                            latest_ship_event = i['exceptionDescription']
+                            break
+                if status == 'In transit':
+                    if response['output']['completeTrackResults'][0]['trackResults'][0]['latestStatusDetail']['description'] != 'In transit':
+                        latest_ship_event = response['output']['completeTrackResults'][0]['trackResults'][0]['latestStatusDetail']['description']
+
                 for i in response['output']['completeTrackResults'][0]['trackResults'][0]['scanEvents']:
-                    if i['eventDescription'] == 'Delivery exception':
-                        latest_ship_event = i['exceptionDescription']
-                        break
-            if status == 'In transit':
-                if response['output']['completeTrackResults'][0]['trackResults'][0]['latestStatusDetail']['description'] != 'In transit':
-                    latest_ship_event = response['output']['completeTrackResults'][0]['trackResults'][0]['latestStatusDetail']['description']
+                    if i['eventDescription'] == 'Delivery exception' and i['exceptionDescription'] == 'Customer not available or business closed':
+                        delivery_attempts += 1
 
-        return [status, status_info, latest_ship_event]
+
+            return [status, status_info, latest_ship_event, delivery_attempts]
     
     def estimate(self, shipper_postal, recipient_postal, weight, declared_value, fdx_svc_type, print_response=False):
         url = 'https://apis.fedex.com/rate/v1/rates/quotes'
