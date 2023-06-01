@@ -14,19 +14,30 @@ class IC:
         self.components = self.jira.project_components("HELPDESK")
         self.ic_component_metrics = {}
 
-    def component_metrics(self, offset=30):
+    def component_metrics(self, offset=30, assignee=True, include_open=True, include_resolved=True):
         """Grab IC Component metrics from HELPDESK Project"""
         
         with Bar('Getting IC Component Metrics..', max=len(self.components)) as bar:
             for component in self.components:
+
+                if include_open and include_resolved:
+                    status = f'AND status in ("Waiting for Yelper", "Waiting for Support", Closed, Resolved) AND resolutiondate >= -{offset}d'
+                elif include_open:
+                    status = 'AND status in ("Waiting for Yelper", "Waiting for Support")'
+                elif include_resolved:
+                    status = f'AND status in (Closed, Resolved) AND resolutiondate >= -{offset}d'
+
+                if assignee:
+                    jql = f'project = HELPDESK {status} AND assignee = {self.username} AND component in("{component.name}")'
+                else:
+                    jql = f'project = HELPDESK {status} AND component in("{component.name}")'
+         
                 maxResults = 50
-                issues = self.jira.search_issues(f'project = HELPDESK AND status in (Resolved, Closed) AND assignee = {self.username} AND \
-                                                    resolutiondate >= -{offset}d and component in("{component.name}")', maxResults=maxResults)
+                issues = self.jira.search_issues(jql, maxResults=maxResults)
+
                 while(len(issues) >= maxResults):
                     maxResults += 50
-                    print(component.name + str(maxResults))
-                    issues = self.jira.search_issues(f'project = HELPDESK AND status in (Resolved, Closed) AND assignee = {self.username} AND \
-                                                    resolutiondate >= -{offset}d and component in("{component.name}")', maxResults=maxResults)
+                    issues = self.jira.search_issues(jql, maxResults=maxResults)
                 if component.name == 'Fedex' and len(issues):
                     self.ic_component_metrics[component.name] = {'total_issues':len(issues), 'carriers': {'GROUND_HOME_DELIVERY': 0, 'FIRST_OVERNIGHT': 0, 'PRIORITY_OVERNIGHT': 0, 'STANDARD_OVERNIGHT': 0, 'FEDEX_2_DAY': 0,\
                                                                                                         'FEDEX_2_DAY_AM': 0, 'FEDEX_EXPRESS_SAVER': 0, 'INTERNATIONAL_ECONOMY': 0, 'FEDEX_GROUND': 0},'time': 0, 'inbound_len': 0,\
@@ -77,11 +88,14 @@ class IC:
                                 no_estimate_found_count += 1
                         else: 
                             no_estimate_found_count += 1
-
-                        date_created = x.fields.created[0:-5]
-                        date_resolved = x.fields.resolutiondate[0:-5]
-                        date_delta = (datetime.datetime.strptime(date_resolved, '%Y-%m-%dT%H:%M:%S.%f') - datetime.datetime.strptime(date_created, '%Y-%m-%dT%H:%M:%S.%f')).total_seconds()
-                        self.ic_component_metrics[component.name]['time'] += date_delta
+                    
+                        try:
+                            date_created = x.fields.created[0:-5]
+                            date_resolved = x.fields.resolutiondate[0:-5]
+                            date_delta = (datetime.datetime.strptime(date_resolved, '%Y-%m-%dT%H:%M:%S.%f') - datetime.datetime.strptime(date_created, '%Y-%m-%dT%H:%M:%S.%f')).total_seconds()
+                            self.ic_component_metrics[component.name]['time'] += date_delta
+                        except TypeError:
+                            pass
 
                         self.ic_component_metrics[component.name]['cost_avg'] += cost
                     self.ic_component_metrics[component.name]['logi_costs_total'] = self.ic_component_metrics[component.name]['cost_avg'] 
@@ -89,15 +103,15 @@ class IC:
 
                 elif len(issues):
                     self.ic_component_metrics[component.name] = {'total_issues': len(issues), 'time': 0}
+                try:   
                     for x in issues:
                         date_created = x.fields.created[0:-5]
                         date_resolved = x.fields.resolutiondate[0:-5]
                         date_delta = (datetime.datetime.strptime(date_resolved, '%Y-%m-%dT%H:%M:%S.%f') - datetime.datetime.strptime(date_created, '%Y-%m-%dT%H:%M:%S.%f')).total_seconds() 
                         self.ic_component_metrics[component.name]['time'] += date_delta
 
-                try:   
                     self.ic_component_metrics[component.name]['time'] = (self.ic_component_metrics[component.name]['time'] / (len(issues))) / 86400
-                except KeyError:
+                except (KeyError, TypeError) as e:
                     pass
                 bar.next()
 
