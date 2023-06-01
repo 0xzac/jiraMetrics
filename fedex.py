@@ -11,9 +11,6 @@ class Fedex:
   
     def authenticate(self):
         """Authenticate with the server, collect api key(FEDEX)"""
-        if self.last_key_refresh and (datetime.now() - timedelta(hours=1)) > self.last_key_refresh:
-            print("Re-authing within one hour.")
-            raise Exception
         url = "https://apis.fedex.com/oauth/token"
 
         payload = {
