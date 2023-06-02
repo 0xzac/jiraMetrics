@@ -141,7 +141,11 @@ class Fedex:
             return self.track_shipment(tracking_num)
 
         if return_raw:
-            return response.json()
+            try:
+                response.json()['output']
+                return response.json()
+            except KeyError:
+                return None
         else:
             return self.process_tracking(response.json())
         
